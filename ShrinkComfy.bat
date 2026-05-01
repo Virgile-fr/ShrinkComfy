@@ -58,7 +58,7 @@ if not exist "_app\.venv\Scripts\python.exe" (
     )
     echo             Python found.   [ OK ]
     echo.
-    echo  -----------------------------------------------------------
+    echo  ----------------------------------------------------------
     echo.
     echo  [ 2 / 3 ]  Creating isolated environment...
     echo.
