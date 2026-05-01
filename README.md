@@ -115,16 +115,16 @@ There is a separate danger-zone option to strip workflow and prompt metadata fro
 
 <br><br>
 
-## Limitations
+## 🚫 Limitations
 
 - It only converts PNG inputs (for now).
 - It is currently a Windows app.
 - It needs Python installed on the machine.
 - WEBP 100% Lossless is not recommended if you want ComfyUI workflow drag-and-drop.
 
-<br><br>
+<br>
 
-## Installation
+## 💽 Installation
 
 1. Download or clone this repository.
 2. Double-click `ShrinkComfy.bat`.
@@ -137,8 +137,8 @@ Requirements:
 - Python 3.9 or newer;
 - Python must be available in `PATH`.
 
-<br><br>
+<br>
 
-## Uninstall
+## 🗑️ Uninstall
 
 Delete the ShrinkComfy folder. Everything the app installs is inside the project folder.
