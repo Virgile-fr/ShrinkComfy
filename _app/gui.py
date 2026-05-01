@@ -362,14 +362,14 @@ class ConverterApp:
         self.lossless_var = tk.BooleanVar(value=False)
         self.same_dir_var = tk.BooleanVar(value=False)
         self.preserve_var = tk.BooleanVar(value=True)
-        self.package_var = tk.BooleanVar(value=False)
-        self.package_name_var = tk.StringVar(value="")
+        self.package_var = tk.BooleanVar(value=True)
+        self.package_name_var = tk.StringVar(value=f"SHRINK-{datetime.now().strftime('%Y-%m-%d')}")
         self.date_sort_var = tk.StringVar(value="none")
         self.date_placement_var = tk.StringVar(value="root")
         self.date_day_style_var = tk.StringVar(value="flat")
         self.date_force_year_var = tk.BooleanVar(value=False)
         self.dest_mode_var = tk.StringVar(value="default")
-        self.package_mode_var = tk.StringVar(value="auto")
+        self.package_mode_var = tk.StringVar(value="custom")
         self.workers_var = tk.IntVar(value=2)
         self.strip_workflow_var = tk.BooleanVar(value=False)
         self.strip_workflow_confirm_var = tk.BooleanVar(value=False)
@@ -378,6 +378,7 @@ class ConverterApp:
         self.sort_no_workflow_var = tk.BooleanVar(value=False)
         self.sort_no_workflow_mode_var = tk.StringVar(value="root")
         self._files_without_workflow = []
+        self._last_output_dir = None
 
         # Backing store pour le chemin de sortie quand same_dir est actif
         self._manual_output = str(DEFAULT_OUTPUT)
@@ -612,8 +613,8 @@ class ConverterApp:
             self._source_log_frame, text="Images without ComfyUI workflow:",
             bg=self.pal["surface"], fg=self.pal["text_muted"], font=(self.font_text, 10),
         ).pack(anchor="w", pady=(2, 2))
-        self.source_log = scrolledtext.ScrolledText(
-            self._source_log_frame, height=6, wrap="word", font=("Consolas", 10),
+        self.source_log = tk.Text(
+            self._source_log_frame, height=4, wrap="word", font=("Consolas", 10),
             bg=self.pal["log_bg"], fg=self.pal["text"], relief="flat", bd=0,
             highlightthickness=1, highlightbackground=self.pal["border"],
             padx=8, pady=6,
@@ -629,7 +630,7 @@ class ConverterApp:
             self._source_unsupported_log_frame, text="Non-convertible files found:",
             bg=self.pal["surface"], fg=self.pal["text_muted"], font=(self.font_text, 10),
         ).pack(anchor="w", pady=(2, 2))
-        self.source_unsupported_log = scrolledtext.ScrolledText(
+        self.source_unsupported_log = tk.Text(
             self._source_unsupported_log_frame, height=4, wrap="word",
             font=("Consolas", 10),
             bg=self.pal["log_bg"], fg=self.pal["text"], relief="flat", bd=0,
@@ -721,7 +722,7 @@ class ConverterApp:
                     if scanned >= 20000:
                         break
                     scanned += 1
-                    if p.is_file() and p.suffix.lower() in _UNSUPPORTED_EXTS:
+                    if p.is_file() and p.suffix.lower() != ".png":
                         ext_counts[p.suffix.lower()] += 1
                         unsupported_files.append(p)
             except Exception:
@@ -759,13 +760,12 @@ class ConverterApp:
                 anchor="w", padx=(16, 0), pady=(0, 4),
                 after=self.source_unsupported_label,
             )
+            tree_text = self._build_file_tree_text(unsupported_files)
             self.source_unsupported_log.configure(state="normal")
             self.source_unsupported_log.delete("1.0", "end")
-            for f in unsupported_files[:300]:
-                self.source_unsupported_log.insert("end", f"  {f.name}\n")
-            if len(unsupported_files) > 300:
-                self.source_unsupported_log.insert(
-                    "end", f"  … and {len(unsupported_files) - 300} more\n")
+            self.source_unsupported_log.insert("end", tree_text)
+            line_count = int(self.source_unsupported_log.index("end-1c").split(".")[0])
+            self.source_unsupported_log.configure(height=max(3, line_count))
             self.source_unsupported_log.configure(state="disabled")
             self._source_unsupported_log_frame.pack(
                 fill="x", pady=(0, 4), after=self.copy_unsupported_check
@@ -822,6 +822,7 @@ class ConverterApp:
     def _apply_workflow_badge(self, with_meta, without_meta, workflow_bytes, counter):
         if self._workflow_check_counter != counter:
             return
+        self._files_without_workflow = without_meta
         total = len(with_meta) + len(without_meta)
         if total == 0:
             self.source_workflow_badge.config(text="")
@@ -846,10 +847,12 @@ class ConverterApp:
         self._update_strip_info()
 
         if without_meta:
+            tree_text = self._build_file_tree_text(without_meta)
             self.source_log.configure(state="normal")
             self.source_log.delete("1.0", "end")
-            for f in without_meta:
-                self.source_log.insert("end", f"  {f.name}\n")
+            self.source_log.insert("end", tree_text)
+            line_count = int(self.source_log.index("end-1c").split(".")[0])
+            self.source_log.configure(height=max(4, line_count))
             self.source_log.configure(state="disabled")
             self._source_log_frame.pack(
                 fill="x", pady=(0, 4), after=self.source_workflow_badge
@@ -993,6 +996,35 @@ class ConverterApp:
             ).pack(anchor="w", padx=(28, 0), pady=1)
         self._date_day_frame.pack(fill="x")  # always inside _date_sub_frame
 
+        # -- No-workflow isolation ---------------------------------------------
+        card = Card(p, self); card.pack(fill="x", pady=(0, 14))
+        c = card.content()
+        self._section_label(c, "No-workflow isolation")
+        self._hint(
+            c,
+            "Images without a ComfyUI workflow can be routed to a separate folder "
+            "so you can review or handle them independently.",
+        ).pack(anchor="w", pady=(0, 8))
+
+        ttk.Checkbutton(
+            c, text="Route images without ComfyUI workflow to a separate folder",
+            variable=self.sort_no_workflow_var,
+            command=self._toggle_no_workflow,
+        ).pack(anchor="w")
+
+        self._no_workflow_sub = tk.Frame(c, bg=self.pal["surface"])
+        ttk.Radiobutton(
+            self._no_workflow_sub,
+            text='Inside output folder  →  output/no-workflow/',
+            variable=self.sort_no_workflow_mode_var, value="root",
+        ).pack(anchor="w", padx=(20, 0), pady=(6, 2))
+        ttk.Radiobutton(
+            self._no_workflow_sub,
+            text='Next to output folder  →  ../no-workflow/',
+            variable=self.sort_no_workflow_mode_var, value="sibling",
+        ).pack(anchor="w", padx=(20, 0))
+        self._no_workflow_sub.pack_forget()
+
         # -- Output hierarchy preview ------------------------------------------
         card = Card(p, self); card.pack(fill="x", pady=(0, 14))
         c = card.content(padx=24, pady=14)
@@ -1012,6 +1044,12 @@ class ConverterApp:
         )
         self.hierarchy_log.pack(fill="x")
         self.hierarchy_log.configure(state="disabled")
+        self.hierarchy_log.tag_configure("hier_root",  foreground=self.pal["accent"],
+                                         font=("Consolas", 10, "bold"))
+        self.hierarchy_log.tag_configure("hier_dir",   foreground=self.pal["text"])
+        self.hierarchy_log.tag_configure("hier_nowf",  foreground="#f59e0b",
+                                         font=("Consolas", 10, "bold"))
+        self.hierarchy_log.tag_configure("hier_total", foreground=self.pal["text_muted"])
 
         self._toggle_dest_mode()
         self._toggle_date_sort_options()
@@ -1076,6 +1114,12 @@ class ConverterApp:
             self._toggle_package_mode()
         else:
             self._package_sub.pack_forget()
+
+    def _toggle_no_workflow(self):
+        if self.sort_no_workflow_var.get():
+            self._no_workflow_sub.pack(fill="x", pady=(4, 0))
+        else:
+            self._no_workflow_sub.pack_forget()
 
     # -- Page 3 : Reglages -------------------------------------------------
 
@@ -1625,6 +1669,10 @@ class ConverterApp:
         self.convert_btn.pack(side="left")
         self.stop_btn = ttk.Button(btn_row, text="Stop", command=self._stop_convert,
                                    style="Win11.TButton")
+        self.open_output_btn = ttk.Button(
+            btn_row, text="Open output folder", command=self._open_output_folder,
+            style="Win11.TButton",
+        )
 
         self.progress = FancyProgressBar(c, self)
         self.progress.pack(fill="x", pady=(0, 8))
@@ -1736,8 +1784,8 @@ class ConverterApp:
         card = Card(p, self); card.pack(fill="x", pady=(0, 4))
         c = card.content()
         self._section_label(c, "Log")
-        self.log = scrolledtext.ScrolledText(
-            c, height=12, wrap="word", font=("Consolas", 10),
+        self.log = tk.Text(
+            c, height=10, wrap="word", font=("Consolas", 10),
             bg=self.pal["log_bg"], fg=self.pal["text"], relief="flat", bd=0,
             highlightthickness=1, highlightbackground=self.pal["border"],
             highlightcolor=self.pal["border"], padx=10, pady=8,
@@ -1745,6 +1793,11 @@ class ConverterApp:
         )
         self.log.pack(fill="x")
         self.log.configure(state="disabled")
+        self.log.tag_configure("log_header", foreground=self.pal["text_muted"])
+        self.log.tag_configure("log_copy",   foreground="#60a5fa")
+        self.log.tag_configure("log_nowf",   foreground="#f59e0b")
+        self.log.tag_configure("log_err",    foreground="#ef4444")
+        self.log.tag_configure("log_ok",     foreground="#22c55e")
 
         self._update_strip_info()
 
@@ -1782,15 +1835,43 @@ class ConverterApp:
     def _refresh_hierarchy(self):
         if not hasattr(self, "hierarchy_log"):
             return
-        text = self._build_hierarchy_text()
+        lines = self._build_hierarchy_lines()
         self.hierarchy_log.configure(state="normal")
         self.hierarchy_log.delete("1.0", "end")
-        self.hierarchy_log.insert("end", text)
+        for text, tag in lines:
+            if tag:
+                self.hierarchy_log.insert("end", text + "\n", tag)
+            else:
+                self.hierarchy_log.insert("end", text + "\n")
         self.hierarchy_log.configure(state="disabled")
 
-    def _build_hierarchy_text(self):
+    def _render_tree_node(self, path, children, all_nodes, lines, prefix, is_last,
+                          is_root, no_wf_dir=None):
+        node = all_nodes.get(path, {"count": 0, "est_size": 0})
+        is_nowf = no_wf_dir is not None and path == no_wf_dir
+        if is_root:
+            connector = ""
+            tag = "hier_root"
+            name = str(path)
+        else:
+            connector = "└── " if is_last else "├── "
+            tag = "hier_nowf" if is_nowf else "hier_dir"
+            name = path.name
+        lines.append((
+            f"{prefix}{connector}\U0001F4C1 {name}/   "
+            f"{node['count']} file(s) · ~{human_size(node['est_size'])}",
+            tag,
+        ))
+        kids = sorted(children.get(path, []), key=lambda p: str(p))
+        new_prefix = prefix + ("    " if is_last else "│   ")
+        for i, kid in enumerate(kids):
+            self._render_tree_node(kid, children, all_nodes, lines,
+                                   new_prefix, i == len(kids) - 1, False,
+                                   no_wf_dir=no_wf_dir)
+
+    def _build_hierarchy_lines(self):
         if not self.scanned_files:
-            return "No source selected."
+            return [("No source selected.", None)]
 
         date_sort = self.date_sort_var.get()
         preserve = self.preserve_var.get() and self.source_is_folder
@@ -1822,7 +1903,8 @@ class ConverterApp:
         _multi_year = False
         if date_sort != "none":
             try:
-                years = {datetime.fromtimestamp(f.stat().st_mtime).year for f in self.scanned_files if f.exists()}
+                years = {datetime.fromtimestamp(f.stat().st_mtime).year
+                         for f in self.scanned_files if f.exists()}
                 _multi_year = len(years) > 1
             except Exception:
                 pass
@@ -1836,12 +1918,10 @@ class ConverterApp:
                 size = src.stat().st_size
             except Exception:
                 size = 0
-
             if effective_output is None:
                 dst_dir = src.parent
             else:
-                date_sub = _date_subdir(src, date_sort,
-                                        multi_year=_multi_year,
+                date_sub = _date_subdir(src, date_sort, multi_year=_multi_year,
                                         day_style=self.date_day_style_var.get())
                 date_placement = self.date_placement_var.get()
                 if preserve and base and src.is_relative_to(base):
@@ -1852,23 +1932,19 @@ class ConverterApp:
                         dst_dir = effective_output / date_sub / rel_dir
                 else:
                     dst_dir = effective_output / date_sub
-
             folder_info[dst_dir]["count"] += 1
             folder_info[dst_dir]["src_size"] += size
 
         if not folder_info:
-            return "No files found."
+            return [("No files found.", None)]
 
-        # Nœuds intermédiaires agrégés
         all_nodes = {}
-
         for leaf, info in folder_info.items():
             est = int(info["src_size"] * factor)
             if leaf not in all_nodes:
                 all_nodes[leaf] = {"count": 0, "est_size": 0}
             all_nodes[leaf]["count"] += info["count"]
             all_nodes[leaf]["est_size"] += est
-
             if effective_output:
                 p = leaf.parent
                 while p != p.parent:
@@ -1880,35 +1956,80 @@ class ConverterApp:
                         break
                     p = p.parent
 
+        no_wf_dir = None
+        no_wf_count = 0
+        no_wf_est = 0
+        if (self.sort_no_workflow_var.get() and self._files_without_workflow
+                and effective_output is not None):
+            nwf_files = self._files_without_workflow
+            no_wf_count = len(nwf_files)
+            try:
+                nwf_src = sum(f.stat().st_size for f in nwf_files if f.exists())
+            except Exception:
+                nwf_src = 0
+            no_wf_est = int(nwf_src * factor)
+            if self.sort_no_workflow_mode_var.get() == "root":
+                no_wf_dir = effective_output / "no-workflow"
+                all_nodes[no_wf_dir] = {"count": no_wf_count, "est_size": no_wf_est}
+
         lines = []
-        sorted_paths = sorted(all_nodes.keys(), key=lambda x: str(x))
 
         if effective_output:
-            for path in sorted_paths:
-                try:
-                    rel = path.relative_to(effective_output)
-                    depth = len(rel.parts)
-                except ValueError:
-                    continue
-                indent = "  " * depth
-                name = str(effective_output) if depth == 0 else path.name
-                node = all_nodes[path]
-                lines.append(
-                    f"{indent}\U0001F4C1 {name}/   "
-                    f"{node['count']} file(s) · ~{human_size(node['est_size'])}"
-                )
+            children = defaultdict(list)
+            for path in all_nodes:
+                if path != effective_output:
+                    parent = path.parent
+                    if parent in all_nodes:
+                        children[parent].append(path)
+            self._render_tree_node(effective_output, children, all_nodes,
+                                   lines, "", True, True, no_wf_dir=no_wf_dir)
+            if no_wf_count > 0 and self.sort_no_workflow_mode_var.get() == "sibling":
+                lines.append(("", None))
+                lines.append((f"\U0001F4C1 {effective_output.parent.name}/", "hier_dir"))
+                lines.append((
+                    f"├── \U0001F4C1 {effective_output.name}/   (see above)",
+                    "hier_dir",
+                ))
+                lines.append((
+                    f"└── \U0001F4C1 no-workflow/   "
+                    f"{no_wf_count} file(s) · ~{human_size(no_wf_est)}",
+                    "hier_nowf",
+                ))
         else:
-            for path in sorted_paths:
+            for path in sorted(all_nodes.keys(), key=lambda x: str(x)):
                 node = all_nodes[path]
-                lines.append(
+                lines.append((
                     f"\U0001F4C1 {path}/   "
-                    f"{node['count']} file(s) · ~{human_size(node['est_size'])}"
-                )
+                    f"{node['count']} file(s) · ~{human_size(node['est_size'])}",
+                    "hier_dir",
+                ))
 
         total_count = sum(v["count"] for v in folder_info.values())
         total_est = int(sum(v["src_size"] for v in folder_info.values()) * factor)
-        lines.append(f"\n  Total : {total_count} file(s) · ~{human_size(total_est)} (estimated)")
+        lines.append(("", None))
+        lines.append((
+            f"  Total: {total_count} file(s) · ~{human_size(total_est)} (estimated)",
+            "hier_total",
+        ))
+        return lines
 
+    def _build_file_tree_text(self, files, max_files=300):
+        if not files:
+            return ""
+        groups = defaultdict(list)
+        shown = list(files)[:max_files]
+        for f in shown:
+            groups[f.parent].append(f)
+        lines = []
+        sorted_parents = sorted(groups.keys(), key=lambda p: str(p))
+        for parent in sorted_parents:
+            children_files = sorted(groups[parent], key=lambda f: f.name)
+            lines.append(f"\U0001F4C1 {parent.name}/")
+            for i, cf in enumerate(children_files):
+                connector = "└── " if i == len(children_files) - 1 else "├── "
+                lines.append(f"    {connector}\U0001F4C4 {cf.name}")
+        if len(files) > max_files:
+            lines.append(f"  … and {len(files) - max_files} more")
         return "\n".join(lines)
 
     # -- Estimation --------------------------------------------------------
@@ -1935,17 +2056,19 @@ class ConverterApp:
 
     # -- Conversion --------------------------------------------------------
 
-    def _log(self, msg):
-        self.log_queue.put(msg)
+    def _log(self, msg, tag=None):
+        self.log_queue.put((msg, tag))
 
     def _poll_log_queue(self):
         try:
             while True:
-                msg = self.log_queue.get_nowait()
+                item = self.log_queue.get_nowait()
+                msg, tag = item if isinstance(item, tuple) else (item, None)
                 if hasattr(self, "log"):
                     self.log.configure(state="normal")
-                    self.log.insert("end", msg + "\n")
-                    self.log.see("end")
+                    self.log.insert("end", msg + "\n", (tag,) if tag else ())
+                    line_count = int(self.log.index("end-1c").split(".")[0])
+                    self.log.configure(height=max(10, line_count))
                     self.log.configure(state="disabled")
         except queue.Empty:
             pass
@@ -2000,14 +2123,34 @@ class ConverterApp:
         sources = self.source_paths[0] if self.source_is_folder else self.source_paths
         package = self._resolve_package_name()
 
+        if output is not None:
+            safe_pkg = ("".join(c for c in package if c not in r'<>:"/\|?*').strip()
+                        if package else "")
+            self._last_output_dir = str(Path(output) / safe_pkg) if safe_pkg else output
+        else:
+            self._last_output_dir = None
+
         self.is_running = True
         self.stop_event.clear()
         self.convert_btn.configure(state="disabled")
+        self.open_output_btn.pack_forget()
         self.stop_btn.pack(side="left", padx=(8, 0))
         self.progress.configure(value=0, maximum=100)
         self.progress.start_anim()
 
         files_to_copy = list(self._unsupported_files) if self.copy_unsupported_var.get() else []
+
+        no_workflow_files = None
+        no_workflow_dir_path = None
+        if (self.sort_no_workflow_var.get()
+                and self._files_without_workflow
+                and output is not None):
+            no_workflow_files = list(self._files_without_workflow)
+            output_p = Path(output)
+            if self.sort_no_workflow_mode_var.get() == "root":
+                no_workflow_dir_path = str(output_p / "no-workflow")
+            else:
+                no_workflow_dir_path = str(output_p.parent / "no-workflow")
 
         thread = threading.Thread(
             target=self._run_convert,
@@ -2016,7 +2159,8 @@ class ConverterApp:
                   self.preserve_var.get(), package, self.date_sort_var.get(),
                   self.date_day_style_var.get(), self.date_placement_var.get(),
                   self.strip_workflow_var.get(), files_to_copy,
-                  self.workers_var.get(), self.date_force_year_var.get()),
+                  self.workers_var.get(), self.date_force_year_var.get(),
+                  no_workflow_files, no_workflow_dir_path),
             daemon=True,
         )
         thread.start()
@@ -2028,7 +2172,8 @@ class ConverterApp:
 
     def _run_convert(self, sources, output, fmt, quality, lossless, recursive,
                      preserve, package, date_sort, date_day_style, date_placement,
-                     strip_workflow, files_to_copy=None, workers=2, force_year_prefix=False):
+                     strip_workflow, files_to_copy=None, workers=2, force_year_prefix=False,
+                     no_workflow_files=None, no_workflow_dir=None):
         params = f"{fmt.upper()} q{quality}" + (" lossless" if lossless else "")
         if package:
             params += f" -> subfolder '{package}'"
@@ -2038,17 +2183,34 @@ class ConverterApp:
                 params += " (within subfolders)"
         if strip_workflow:
             params += " · workflow stripped"
-        self._log(f"--- Started: {params} ---")
+        if no_workflow_dir:
+            params += f" · no-workflow → {Path(no_workflow_dir).name}/"
+        self._log(f"--- Started: {params} ---", "log_header")
+        if files_to_copy:
+            self._log(f"  {len(files_to_copy)} non-convertible file(s) will be copied as-is", "log_copy")
 
-        def cb(i, total, name, msg, elapsed, eta):
+        def cb(i, total, name, msg, elapsed, eta, is_no_wf=False):
             if total > 0:
                 self.root.after(0, lambda: self.progress.configure(maximum=total, value=i))
                 status = f"{i} / {total}    ·    ETA {self._format_eta(eta)}"
                 self.root.after(0, lambda s=status: self.status_label.config(text=s))
             if name:
-                self._log(f"  [{i}/{total}] {name}  {msg}")
+                low = msg.lower()
+                if "failed" in low or "error" in low or "echou" in low:
+                    tag = "log_err"
+                elif is_no_wf:
+                    tag = "log_nowf"
+                else:
+                    tag = None
+                self._log(f"  [{i}/{total}] {name}  {msg}", tag)
             else:
-                self._log(f"  {msg}")
+                self._log(f"  {msg}", "log_header")
+
+        def copy_cb(src, dst, success):
+            if success:
+                self._log(f"  [copy] {src.name}", "log_copy")
+            else:
+                self._log(f"  [copy failed] {src.name}", "log_err")
 
         try:
             result = batch_convert(
@@ -2060,14 +2222,17 @@ class ConverterApp:
                 files_to_copy=files_to_copy or [],
                 workers=workers, force_year_prefix=force_year_prefix,
                 progress_callback=cb, stop_event=self.stop_event,
+                no_workflow_files=no_workflow_files,
+                no_workflow_dir=no_workflow_dir,
+                copy_callback=copy_cb,
             )
-            tag = "Stopped" if result.get("stopped") else "Done"
+            status_word = "Stopped" if result.get("stopped") else "Done"
             saved = human_size(result.get("saved_bytes", 0))
-            summary = (f"--- {tag}: {result['success']}/{result['total']} successful, "
+            summary = (f"--- {status_word}: {result['success']}/{result['total']} successful, "
                        f"{result['failed']} failed · {saved} saved ---")
-            self._log(summary)
+            self._log(summary, "log_header")
             self.root.after(0, lambda: self.status_label.config(
-                text=f"{tag}. {result['success']}/{result['total']} converted, {saved} saved."
+                text=f"{status_word}. {result['success']}/{result['total']} converted, {saved} saved."
             ))
         except Exception as e:
             self._log(f"[!] Error: {e}")
@@ -2079,6 +2244,15 @@ class ConverterApp:
         self.progress.stop_anim()
         self.stop_btn.pack_forget()
         self._check_convert_ready()
+        if self._last_output_dir:
+            self.open_output_btn.pack(side="left", padx=(8, 0))
+        else:
+            self.open_output_btn.pack_forget()
+
+    def _open_output_folder(self):
+        if self._last_output_dir:
+            import subprocess
+            subprocess.Popen(["explorer", str(Path(self._last_output_dir))])
 
 
 def main():

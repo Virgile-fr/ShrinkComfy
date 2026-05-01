@@ -222,6 +222,7 @@ def batch_convert(
     stop_event=None,
     no_workflow_files=None,
     no_workflow_dir=None,
+    copy_callback=None,
 ):
     """
     sources          : Path (fichier/dossier) ou liste de Path.
@@ -288,10 +289,8 @@ def batch_convert(
         if stop_event is not None and stop_event.is_set():
             stopped_flag[0] = True
             return
-        if _no_wf_set and src in _no_wf_set and no_workflow_dir is not None:
-            effective_out = Path(no_workflow_dir)
-        else:
-            effective_out = output_dir
+        is_no_wf = bool(_no_wf_set and src in _no_wf_set and no_workflow_dir is not None)
+        effective_out = Path(no_workflow_dir) if is_no_wf else output_dir
         dst = _dst(src, effective_out)
         t0 = time.time()
         old_size = src.stat().st_size
@@ -314,7 +313,7 @@ def batch_convert(
             avg = sum(times) / len(times)
             eta = avg * (total - i)
         if progress_callback:
-            progress_callback(i, total, src.name, msg, elapsed, eta)
+            progress_callback(i, total, src.name, msg, elapsed, eta, is_no_wf)
 
     n_workers = max(1, min(workers, total))
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
@@ -334,8 +333,11 @@ def batch_convert(
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
+                if copy_callback:
+                    copy_callback(src, dst, True)
             except Exception:
-                pass
+                if copy_callback:
+                    copy_callback(src, dst, False)
 
     return {
         "total": total,
