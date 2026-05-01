@@ -39,15 +39,15 @@ During conversion it keeps the ComfyUI workflow metadata when possible. If a PNG
 
 <h2> How The App Works: <br><br> 📂 Source</h2>
 
-Pick a folder or a few PNG images. If you pick a folder, you can include subfolders.
+Pick a folder or a few PNG images. If you pick a folder, you can include subfolders
 
 ShrinkComfy scans the selection and shows:
 
 - how many PNG files it found;
-- the total size;
-- whether those PNGs contain ComfyUI workflow data;
-- which files do not have workflow metadata;
-- which non-PNG files were also found in the folder.
+- the total size
+- whether those PNGs contain ComfyUI workflow data
+- which files do not have workflow metadata
+- which non-PNG files were also found in the folder
 
 <p align="center">
   <img src="./_readme/source.webp">
@@ -72,12 +72,11 @@ The output page includes a folder tree preview, so you can check the result befo
 ## ⚙️ Settings
 
 Choose the format and quality.<br>
-⚠️ Do not use WEBP Lossless if you need drag-and-drop back into ComfyUI. ComfyUI does not read workflows from lossless WEBP files.
-
 <p align="center">
   <img src="./_readme/settings.webp">
 </p>
-<br>
+⚠️ Do not use WEBP Lossless if you need drag-and-drop back into ComfyUI. ComfyUI does not read workflows from lossless WEBP files.
+<br><br>
 
 ## 👁️ Preview
 
@@ -85,8 +84,8 @@ Preview lets you compare the original PNG with the converted result before conve
 
 There are two modes:
 
-- side-by-side comparison;
-- slider comparison.
+- side-by-side comparison
+- slider comparison
 
 You can zoom in and pan around the image, which is useful for checking faces, textures, gradients, and other places where compression artifacts show up first.
 
@@ -101,9 +100,9 @@ This is where you run the batch.
 
 Before converting, ShrinkComfy estimates:
 
-- detected input size;
-- expected output size;
-- expected space saved.
+- detected input size
+- expected output size
+- expected space saved
 
 During conversion it shows progress and logs each file. You can also choose how many CPU workers to use.
 
@@ -117,25 +116,25 @@ There is a separate danger-zone option to strip workflow and prompt metadata fro
 
 ## 🚫 Limitations
 
-- It only converts PNG inputs (for now).
-- It is currently a Windows app.
-- It needs Python installed on the machine.
-- WEBP 100% Lossless is not recommended if you want ComfyUI workflow drag-and-drop.
+- It only converts PNG inputs (for now)
+- It is currently a Windows app
+- It needs Python installed on the machine
+- WEBP 100% Lossless is not recommended if you want ComfyUI workflow drag-and-drop
 
 <br>
 
 ## 💽 Installation
 
-1. Download or clone this repository.
-2. Double-click `ShrinkComfy.bat`.
+1. Download or clone this repository
+2. Double-click `ShrinkComfy.bat`
 
 On first launch, the app creates a local virtual environment in `_app/.venv/` and installs what it needs there. The first launch can take a little longer.
 
 Requirements:
 
-- Windows 10 or 11;
-- Python 3.9 or newer;
-- Python must be available in `PATH`.
+- Windows 10 or 11
+- Python 3.9 or newer
+- Python must be available in `PATH`
 
 <br>
 
