@@ -9,13 +9,57 @@ Limitation : ComfyUI ne lit PAS le workflow depuis les WEBP lossless.
 """
 
 import io
+import os
 import shutil
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from PIL import Image
 import concurrent.futures
 import threading as _thd
+
+
+# -- Timestamps --------------------------------------------------------------
+
+def _copy_timestamps(src_path: Path, dst_path: Path) -> None:
+    """Copy atime/mtime (and ctime on Windows) from src to dst."""
+    try:
+        st = src_path.stat()
+        os.utime(dst_path, (st.st_atime, st.st_mtime))
+    except Exception:
+        return
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateFileW(
+            str(dst_path), 0x40000000, 0x00000001, None, 3, 0x80, None,
+        )
+        if handle == -1:
+            return
+        try:
+            EPOCH_DIFF = 116444736000000000  # 100-ns from 1601-01-01 to 1970-01-01
+
+            def _to_ft(t):
+                v = int(t * 1e7) + EPOCH_DIFF
+                ft = wt.FILETIME()
+                ft.dwLowDateTime = v & 0xFFFFFFFF
+                ft.dwHighDateTime = (v >> 32) & 0xFFFFFFFF
+                return ft
+
+            kernel32.SetFileTime(
+                handle,
+                ctypes.byref(_to_ft(st.st_ctime)),
+                ctypes.byref(_to_ft(st.st_atime)),
+                ctypes.byref(_to_ft(st.st_mtime)),
+            )
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        pass
 
 
 # -- Metadonnees ComfyUI -----------------------------------------------------
@@ -127,6 +171,7 @@ def convert_image(src_path, dst_path, fmt="webp", quality=90, lossless=False,
         original_size = src_path.stat().st_size
         img.save(dst_path, fmt.upper(), **save_kwargs)
         new_size = dst_path.stat().st_size
+        _copy_timestamps(src_path, dst_path)
     except Exception as e:
         return False, f"Ecriture echouee : {e}", 0
 
@@ -221,7 +266,6 @@ def batch_convert(
     progress_callback=None,
     stop_event=None,
     no_workflow_files=None,
-    no_workflow_dir=None,
     copy_callback=None,
 ):
     """
@@ -289,9 +333,12 @@ def batch_convert(
         if stop_event is not None and stop_event.is_set():
             stopped_flag[0] = True
             return
-        is_no_wf = bool(_no_wf_set and src in _no_wf_set and no_workflow_dir is not None)
-        effective_out = Path(no_workflow_dir) if is_no_wf else output_dir
-        dst = _dst(src, effective_out)
+        is_no_wf = bool(_no_wf_set and src in _no_wf_set and output_dir is not None)
+        if is_no_wf:
+            normal_dst = _dst(src, output_dir)
+            dst = normal_dst.parent / "no-workflow" / normal_dst.name
+        else:
+            dst = _dst(src, output_dir)
         t0 = time.time()
         old_size = src.stat().st_size
         ok, msg, new_size = convert_image(

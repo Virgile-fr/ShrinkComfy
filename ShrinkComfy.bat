@@ -52,6 +52,8 @@ pause >nul
     if exist ".gitignore"  del /f /q ".gitignore"
     if exist "README.md"   del /f /q "README.md"
     if exist "README.png"  del /f /q "README.png"
+    if exist "_readme"     rd  /s /q "_readme"
+    if exist ".git"        rd  /s /q ".git"
 
     echo  +--------------------------------------+
     echo  ^|       ShrinkComfy is ready!          ^|

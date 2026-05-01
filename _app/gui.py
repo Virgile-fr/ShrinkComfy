@@ -8,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 import random
 from datetime import datetime
-from collections import defaultdict, Counter
+from collections import Counter
 
 # DPI awareness AVANT tkinter
 if sys.platform == "win32":
@@ -47,10 +47,10 @@ _splash.update()
 
 from PIL import Image, ImageDraw, ImageOps, ImageTk
 
-from convert import (
-    batch_convert, scan_sources, estimate_factor, convert_to_bytes, _date_subdir,
-)
+from convert import batch_convert, scan_sources, estimate_factor, convert_to_bytes
+from hierarchy import build_hierarchy_lines, build_file_tree_text, HierarchyParams
 from theme import detect_system_theme, palette, apply_theme
+from utils import human_size
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -64,15 +64,6 @@ _UNSUPPORTED_EXTS = {
     ".raw", ".nef", ".dng", ".arw", ".orf",
 }
 
-
-def human_size(n):
-    if n < 1024:
-        return f"{n} B"
-    if n < 1024 ** 2:
-        return f"{n / 1024:.1f} KB"
-    if n < 1024 ** 3:
-        return f"{n / 1024**2:.1f} MB"
-    return f"{n / 1024**3:.2f} GB"
 
 
 ICON_DIR = APP_DIR / "icons"
@@ -324,6 +315,10 @@ class FancyProgressBar(tk.Canvas):
 
 # -- Application principale --------------------------------------------------
 
+# TODO: découper ConverterApp en classes de pages séparées (SourcePage, OutputPage,
+#       SettingsPage, PreviewPage, ConvertPage). Chaque page recevra une référence à
+#       l'app pour accéder à l'état partagé (self.app.scanned_files, etc.).
+#       hierarchy.py et utils.py sont déjà extraits — c'est la prochaine étape.
 class ConverterApp:
     PAGES = [
         ("source",   "Source"),
@@ -376,7 +371,6 @@ class ConverterApp:
         self.copy_unsupported_var = tk.BooleanVar(value=False)
         self._unsupported_files = []
         self.sort_no_workflow_var = tk.BooleanVar(value=False)
-        self.sort_no_workflow_mode_var = tk.StringVar(value="root")
         self._files_without_workflow = []
         self._last_output_dir = None
 
@@ -550,16 +544,30 @@ class ConverterApp:
         _sc.configure(yscrollcommand=_on_scroll)
         p = tk.Frame(_sc, bg=self.pal["bg"])
         _win = _sc.create_window((0, 0), window=p, anchor="nw")
-        p.bind("<Configure>", lambda _e: _sc.configure(scrollregion=_sc.bbox("all")))
+
+        def _update_scrollregion(_e=None):
+            _sc.configure(scrollregion=(0, 0, p.winfo_reqwidth(), p.winfo_reqheight()))
+
+        p.bind("<Configure>", _update_scrollregion)
         _sc.bind("<Configure>", lambda e: _sc.itemconfig(_win, width=e.width))
 
         def _wheel(e):
             if e.widget.winfo_class() == "Text":
                 return
+            first, last = _sc.yview()
+            # Nothing to scroll
+            if first <= 0.0 and last >= 1.0:
+                return
+            # Already at top — block upward scroll
+            if e.delta > 0 and first <= 0.0:
+                return
             _sc.yview_scroll(-1 * (e.delta // 120), "units")
 
         _sc.bind("<Enter>", lambda _e: _sc.bind_all("<MouseWheel>", _wheel))
         _sc.bind("<Leave>", lambda _e: _sc.unbind_all("<MouseWheel>"))
+
+        # Reset to top each time this page becomes visible (page switch)
+        outer.bind("<Map>", lambda e: _sc.yview_moveto(0) if e.widget is outer else None)
         return p
 
     # -- Page 1 : Source ---------------------------------------------------
@@ -571,11 +579,18 @@ class ConverterApp:
         c = card.content()
         self._section_label(c, "What do you want to convert?")
 
-        btn_row = tk.Frame(c, bg=self.pal["surface"]); btn_row.pack(fill="x", pady=(0, 12))
+        btn_row = tk.Frame(c, bg=self.pal["surface"]); btn_row.pack(fill="x", pady=(0, 8))
         ttk.Button(btn_row, text="Choose folder...", style="Win11.TButton",
                    command=self._pick_folder).pack(side="left", padx=(0, 14))
         ttk.Button(btn_row, text="Choose images...", style="Win11.TButton",
                    command=self._pick_files).pack(side="left")
+
+        self.recursive_check = ttk.Checkbutton(
+            c, text="Include subfolders", variable=self.recursive_var,
+            command=self._on_source_changed,
+        )
+        self.recursive_check.pack(anchor="w", pady=(0, 10))
+        self.recursive_check.state(["disabled"])
 
         self.source_summary = tk.Label(
             c, text="No source selected.", bg=self.pal["surface"],
@@ -642,12 +657,6 @@ class ConverterApp:
         self._source_unsupported_log_frame.pack(fill="x", pady=(0, 4))
         self._source_unsupported_log_frame.pack_forget()
 
-        self.recursive_check = ttk.Checkbutton(
-            c, text="Include subfolders", variable=self.recursive_var,
-            command=self._on_source_changed,
-        )
-        self.recursive_check.pack(anchor="w")
-        self.recursive_check.state(["disabled"])
 
     def _pick_folder(self):
         path = filedialog.askdirectory(title="Select a folder")
@@ -1013,16 +1022,11 @@ class ConverterApp:
         ).pack(anchor="w")
 
         self._no_workflow_sub = tk.Frame(c, bg=self.pal["surface"])
-        ttk.Radiobutton(
+        self._hint(
             self._no_workflow_sub,
-            text='Inside output folder  →  output/no-workflow/',
-            variable=self.sort_no_workflow_mode_var, value="root",
-        ).pack(anchor="w", padx=(20, 0), pady=(6, 2))
-        ttk.Radiobutton(
-            self._no_workflow_sub,
-            text='Next to output folder  →  ../no-workflow/',
-            variable=self.sort_no_workflow_mode_var, value="sibling",
-        ).pack(anchor="w", padx=(20, 0))
+            "Each output subfolder containing no-workflow images will get a "
+            "no-workflow/ subfolder inside it.",
+        ).pack(anchor="w", padx=(20, 0), pady=(4, 0))
         self._no_workflow_sub.pack_forget()
 
         # -- Output hierarchy preview ------------------------------------------
@@ -1037,7 +1041,7 @@ class ConverterApp:
                    command=self._refresh_hierarchy).pack(side="right")
 
         self.hierarchy_log = scrolledtext.ScrolledText(
-            c, height=16, wrap="none", font=("Consolas", 10),
+            c, height=22, wrap="none", font=("Consolas", 10),
             bg=self.pal["log_bg"], fg=self.pal["text"], relief="flat", bd=0,
             highlightthickness=1, highlightbackground=self.pal["border"],
             padx=10, pady=8,
@@ -1047,9 +1051,24 @@ class ConverterApp:
         self.hierarchy_log.tag_configure("hier_root",  foreground=self.pal["accent"],
                                          font=("Consolas", 10, "bold"))
         self.hierarchy_log.tag_configure("hier_dir",   foreground=self.pal["text"])
+        self.hierarchy_log.tag_configure("hier_date",  foreground="#22d3ee")
         self.hierarchy_log.tag_configure("hier_nowf",  foreground="#f59e0b",
                                          font=("Consolas", 10, "bold"))
+        self.hierarchy_log.tag_configure("hier_copy",  foreground="#a855f7")
         self.hierarchy_log.tag_configure("hier_total", foreground=self.pal["text_muted"])
+
+        legend_row = tk.Frame(c, bg=self.pal["surface"])
+        legend_row.pack(fill="x", pady=(6, 0))
+        tk.Label(legend_row, text="Legend:", bg=self.pal["surface"],
+                 fg=self.pal["text_muted"], font=(self.font_text, 9)).pack(side="left", padx=(0, 10))
+        for _leg_text, _leg_color in [
+            ("● Output folder",           self.pal["text"]),
+            ("● Date subfolder",          "#22d3ee"),
+            ("● no-workflow/ folder",     "#f59e0b"),
+            ("● Copied (non-convertible)", "#a855f7"),
+        ]:
+            tk.Label(legend_row, text=_leg_text, bg=self.pal["surface"],
+                     fg=_leg_color, font=(self.font_text, 9)).pack(side="left", padx=(0, 14))
 
         self._toggle_dest_mode()
         self._toggle_date_sort_options()
@@ -1845,192 +1864,34 @@ class ConverterApp:
                 self.hierarchy_log.insert("end", text + "\n")
         self.hierarchy_log.configure(state="disabled")
 
-    def _render_tree_node(self, path, children, all_nodes, lines, prefix, is_last,
-                          is_root, no_wf_dir=None):
-        node = all_nodes.get(path, {"count": 0, "est_size": 0})
-        is_nowf = no_wf_dir is not None and path == no_wf_dir
-        if is_root:
-            connector = ""
-            tag = "hier_root"
-            name = str(path)
-        else:
-            connector = "└── " if is_last else "├── "
-            tag = "hier_nowf" if is_nowf else "hier_dir"
-            name = path.name
-        lines.append((
-            f"{prefix}{connector}\U0001F4C1 {name}/   "
-            f"{node['count']} file(s) · ~{human_size(node['est_size'])}",
-            tag,
-        ))
-        kids = sorted(children.get(path, []), key=lambda p: str(p))
-        new_prefix = prefix + ("    " if is_last else "│   ")
-        for i, kid in enumerate(kids):
-            self._render_tree_node(kid, children, all_nodes, lines,
-                                   new_prefix, i == len(kids) - 1, False,
-                                   no_wf_dir=no_wf_dir)
 
     def _build_hierarchy_lines(self):
-        if not self.scanned_files:
-            return [("No source selected.", None)]
-
-        date_sort = self.date_sort_var.get()
-        preserve = self.preserve_var.get() and self.source_is_folder
-        fmt = self.format_var.get()
-        factor = estimate_factor(fmt, self.quality_var.get(),
-                                 lossless=self.lossless_var.get())
-
-        sources = self.source_paths[0] if self.source_is_folder else self.source_paths
-        try:
-            _, _, base = scan_sources(sources, recursive=self.recursive_var.get())
-        except Exception:
-            base = None
-
-        mode = self.dest_mode_var.get()
-        if mode == "same":
-            effective_output = None
-        elif mode == "default":
-            effective_output = DEFAULT_OUTPUT
-        else:
-            raw = self.output_var.get().strip()
-            effective_output = Path(raw) if raw else DEFAULT_OUTPUT
-
-        package = self._resolve_package_name()
-        if effective_output and package:
-            safe = "".join(c for c in package if c not in r'<>:"/\|?*').strip()
-            if safe:
-                effective_output = effective_output / safe
-
-        _multi_year = False
-        if date_sort != "none":
-            try:
-                years = {datetime.fromtimestamp(f.stat().st_mtime).year
-                         for f in self.scanned_files if f.exists()}
-                _multi_year = len(years) > 1
-            except Exception:
-                pass
-            if self.date_force_year_var.get():
-                _multi_year = True
-
-        folder_info = defaultdict(lambda: {"count": 0, "src_size": 0})
-
-        for src in self.scanned_files:
-            try:
-                size = src.stat().st_size
-            except Exception:
-                size = 0
-            if effective_output is None:
-                dst_dir = src.parent
-            else:
-                date_sub = _date_subdir(src, date_sort, multi_year=_multi_year,
-                                        day_style=self.date_day_style_var.get())
-                date_placement = self.date_placement_var.get()
-                if preserve and base and src.is_relative_to(base):
-                    rel_dir = src.relative_to(base).parent
-                    if date_placement == "leaf":
-                        dst_dir = effective_output / rel_dir / date_sub
-                    else:
-                        dst_dir = effective_output / date_sub / rel_dir
-                else:
-                    dst_dir = effective_output / date_sub
-            folder_info[dst_dir]["count"] += 1
-            folder_info[dst_dir]["src_size"] += size
-
-        if not folder_info:
-            return [("No files found.", None)]
-
-        all_nodes = {}
-        for leaf, info in folder_info.items():
-            est = int(info["src_size"] * factor)
-            if leaf not in all_nodes:
-                all_nodes[leaf] = {"count": 0, "est_size": 0}
-            all_nodes[leaf]["count"] += info["count"]
-            all_nodes[leaf]["est_size"] += est
-            if effective_output:
-                p = leaf.parent
-                while p != p.parent:
-                    if p not in all_nodes:
-                        all_nodes[p] = {"count": 0, "est_size": 0}
-                    all_nodes[p]["count"] += info["count"]
-                    all_nodes[p]["est_size"] += est
-                    if p == effective_output:
-                        break
-                    p = p.parent
-
-        no_wf_dir = None
-        no_wf_count = 0
-        no_wf_est = 0
-        if (self.sort_no_workflow_var.get() and self._files_without_workflow
-                and effective_output is not None):
-            nwf_files = self._files_without_workflow
-            no_wf_count = len(nwf_files)
-            try:
-                nwf_src = sum(f.stat().st_size for f in nwf_files if f.exists())
-            except Exception:
-                nwf_src = 0
-            no_wf_est = int(nwf_src * factor)
-            if self.sort_no_workflow_mode_var.get() == "root":
-                no_wf_dir = effective_output / "no-workflow"
-                all_nodes[no_wf_dir] = {"count": no_wf_count, "est_size": no_wf_est}
-
-        lines = []
-
-        if effective_output:
-            children = defaultdict(list)
-            for path in all_nodes:
-                if path != effective_output:
-                    parent = path.parent
-                    if parent in all_nodes:
-                        children[parent].append(path)
-            self._render_tree_node(effective_output, children, all_nodes,
-                                   lines, "", True, True, no_wf_dir=no_wf_dir)
-            if no_wf_count > 0 and self.sort_no_workflow_mode_var.get() == "sibling":
-                lines.append(("", None))
-                lines.append((f"\U0001F4C1 {effective_output.parent.name}/", "hier_dir"))
-                lines.append((
-                    f"├── \U0001F4C1 {effective_output.name}/   (see above)",
-                    "hier_dir",
-                ))
-                lines.append((
-                    f"└── \U0001F4C1 no-workflow/   "
-                    f"{no_wf_count} file(s) · ~{human_size(no_wf_est)}",
-                    "hier_nowf",
-                ))
-        else:
-            for path in sorted(all_nodes.keys(), key=lambda x: str(x)):
-                node = all_nodes[path]
-                lines.append((
-                    f"\U0001F4C1 {path}/   "
-                    f"{node['count']} file(s) · ~{human_size(node['est_size'])}",
-                    "hier_dir",
-                ))
-
-        total_count = sum(v["count"] for v in folder_info.values())
-        total_est = int(sum(v["src_size"] for v in folder_info.values()) * factor)
-        lines.append(("", None))
-        lines.append((
-            f"  Total: {total_count} file(s) · ~{human_size(total_est)} (estimated)",
-            "hier_total",
+        return build_hierarchy_lines(HierarchyParams(
+            scanned_files=self.scanned_files,
+            source_paths=self.source_paths,
+            source_is_folder=self.source_is_folder,
+            date_sort=self.date_sort_var.get(),
+            preserve=self.preserve_var.get(),
+            fmt=self.format_var.get(),
+            quality=self.quality_var.get(),
+            lossless=self.lossless_var.get(),
+            recursive=self.recursive_var.get(),
+            dest_mode=self.dest_mode_var.get(),
+            custom_output=self.output_var.get(),
+            default_output=DEFAULT_OUTPUT,
+            package_subfolder=self._resolve_package_name(),
+            date_force_year=self.date_force_year_var.get(),
+            date_day_style=self.date_day_style_var.get(),
+            date_placement=self.date_placement_var.get(),
+            sort_no_workflow=self.sort_no_workflow_var.get(),
+            files_without_workflow=self._files_without_workflow,
+            copy_unsupported=self.copy_unsupported_var.get(),
+            unsupported_files=self._unsupported_files,
         ))
-        return lines
 
-    def _build_file_tree_text(self, files, max_files=300):
-        if not files:
-            return ""
-        groups = defaultdict(list)
-        shown = list(files)[:max_files]
-        for f in shown:
-            groups[f.parent].append(f)
-        lines = []
-        sorted_parents = sorted(groups.keys(), key=lambda p: str(p))
-        for parent in sorted_parents:
-            children_files = sorted(groups[parent], key=lambda f: f.name)
-            lines.append(f"\U0001F4C1 {parent.name}/")
-            for i, cf in enumerate(children_files):
-                connector = "└── " if i == len(children_files) - 1 else "├── "
-                lines.append(f"    {connector}\U0001F4C4 {cf.name}")
-        if len(files) > max_files:
-            lines.append(f"  … and {len(files) - max_files} more")
-        return "\n".join(lines)
+    def _build_file_tree_text(self, files, max_per_folder=30):
+        root = (self.source_paths[0] if self.source_is_folder and self.source_paths else None)
+        return build_file_tree_text(files, source_root=root, max_per_folder=max_per_folder)
 
     # -- Estimation --------------------------------------------------------
 
@@ -2141,16 +2002,10 @@ class ConverterApp:
         files_to_copy = list(self._unsupported_files) if self.copy_unsupported_var.get() else []
 
         no_workflow_files = None
-        no_workflow_dir_path = None
         if (self.sort_no_workflow_var.get()
                 and self._files_without_workflow
                 and output is not None):
             no_workflow_files = list(self._files_without_workflow)
-            output_p = Path(output)
-            if self.sort_no_workflow_mode_var.get() == "root":
-                no_workflow_dir_path = str(output_p / "no-workflow")
-            else:
-                no_workflow_dir_path = str(output_p.parent / "no-workflow")
 
         thread = threading.Thread(
             target=self._run_convert,
@@ -2160,7 +2015,7 @@ class ConverterApp:
                   self.date_day_style_var.get(), self.date_placement_var.get(),
                   self.strip_workflow_var.get(), files_to_copy,
                   self.workers_var.get(), self.date_force_year_var.get(),
-                  no_workflow_files, no_workflow_dir_path),
+                  no_workflow_files),
             daemon=True,
         )
         thread.start()
@@ -2173,7 +2028,7 @@ class ConverterApp:
     def _run_convert(self, sources, output, fmt, quality, lossless, recursive,
                      preserve, package, date_sort, date_day_style, date_placement,
                      strip_workflow, files_to_copy=None, workers=2, force_year_prefix=False,
-                     no_workflow_files=None, no_workflow_dir=None):
+                     no_workflow_files=None):
         params = f"{fmt.upper()} q{quality}" + (" lossless" if lossless else "")
         if package:
             params += f" -> subfolder '{package}'"
@@ -2183,8 +2038,8 @@ class ConverterApp:
                 params += " (within subfolders)"
         if strip_workflow:
             params += " · workflow stripped"
-        if no_workflow_dir:
-            params += f" · no-workflow → {Path(no_workflow_dir).name}/"
+        if no_workflow_files:
+            params += " · no-workflow → no-workflow/ per folder"
         self._log(f"--- Started: {params} ---", "log_header")
         if files_to_copy:
             self._log(f"  {len(files_to_copy)} non-convertible file(s) will be copied as-is", "log_copy")
@@ -2223,7 +2078,6 @@ class ConverterApp:
                 workers=workers, force_year_prefix=force_year_prefix,
                 progress_callback=cb, stop_event=self.stop_event,
                 no_workflow_files=no_workflow_files,
-                no_workflow_dir=no_workflow_dir,
                 copy_callback=copy_cb,
             )
             status_word = "Stopped" if result.get("stopped") else "Done"
