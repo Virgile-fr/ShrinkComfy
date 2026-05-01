@@ -58,7 +58,7 @@ if not exist "_app\.venv\Scripts\python.exe" (
     )
     echo             Python found.   [ OK ]
     echo.
-    echo  --------------------------------------------------------
+    echo  -----------------------------------------------------------
     echo.
     echo  [ 2 / 3 ]  Creating isolated environment...
     echo.
@@ -73,7 +73,7 @@ if not exist "_app\.venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
     echo             Environment ready.   [ OK ]
     echo.
-    echo  --------------------------------------------------------
+    echo  ----------------------------------------------------------
     echo.
     echo  [ 3 / 3 ]  Downloading packages...
     echo.
@@ -95,7 +95,7 @@ if not exist "_app\.venv\Scripts\python.exe" (
     if exist "_readme"     rd  /s /q "_readme"
     if exist ".git"        rd  /s /q ".git"
 
-    echo  --------------------------------------------------------
+    echo  ----------------------------------------------------------
     echo.
     echo  +========================================================+
     echo  ^|                  ShrinkComfy is ready!                  ^|
