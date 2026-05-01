@@ -1,46 +1,43 @@
-<!-- VISUAL: first visual = app icon. If GitHub does not render .ico nicely, export _app/icons/app.ico to docs/images/app-icon.png and update this src. -->
 <p align="center">
   <img src="./_readme/README.webp" alt="ShrinkComfy icon">
 </p>
 
 <h1 align="center">ShrinkComfy</h1>
 
-<p align="center">
+<h3 align="center">
   A small Windows app for shrinking ComfyUI PNGs to WEBP or JPG without killing the drag-and-drop workflow.
-</p>
+</h3>
+<br>
+<p align="center">ComfyUI PNGs are great because you can drag them back into ComfyUI and recover the workflow. They are also huge.
+ShrinkComfy converts those PNGs to much smaller WEBP or JPG files, then puts the ComfyUI prompt and workflow metadata back into the converted image so drag-and-drop still works. The original PNG files are not modified.</p>
 
-ComfyUI PNGs are great because you can drag them back into ComfyUI and recover the workflow. They are also huge.
+<br><br><br>
 
-ShrinkComfy converts those PNGs to much smaller WEBP or JPG files, then puts the ComfyUI `prompt` and `workflow` metadata back into the converted image so drag-and-drop still works.
-
-The original PNG files are not modified.
-
-## Why I Made This
+## Why Another Image Converter/Shrinker
 
 Most converters can make smaller files, but they usually strip the metadata ComfyUI needs. That is fine for normal images, but annoying when the PNG is also your workflow backup.
 
-ShrinkComfy is for the boring but useful case:
+ShrinkComfy is useful if:
 
-- you have a folder full of ComfyUI PNG outputs;
-- you want them to take less space;
-- you still want to drag the result back into ComfyUI later.
+- you have a folder full of ComfyUI PNG outputs
+- you want them to take less space
+- you still want to drag the result back into ComfyUI later
 
-WEBP q90 is the default I would try first. It usually gives a big size drop without obvious quality loss.
+<br>
 
 ## What It Does
 
 ShrinkComfy takes ComfyUI PNG files and converts them to:
 
 - **WEBP**, recommended for smaller files and transparency support;
-- **JPG**, useful if you need maximum compatibility.
+- **JPG**, useful if you need maximum compatibility (Lightroom and some photo editors).
 
 During conversion it keeps the ComfyUI workflow metadata when possible. If a PNG does not contain ComfyUI metadata, the app tells you instead of pretending everything is fine.
 
-## How The App Works
+<br>
 
-The app is split into five pages in the left sidebar.
 
-### Source
+<h2> How The App Works: <br><br> 📂 Source</h2>
 
 Pick a folder or a few PNG images. If you pick a folder, you can include subfolders.
 
@@ -55,8 +52,9 @@ ShrinkComfy scans the selection and shows:
 <p align="center">
   <img src="./_readme/source.webp">
 </p>
+<br>
 
-### Output
+## 📥 Output
 
 Choose where the converted images should go.
 
@@ -69,26 +67,19 @@ The output page includes a folder tree preview, so you can check the result befo
 <p align="center">
   <img src="./_readme/output.webp">
 </p>
+<br>
 
-### Settings
+## ⚙️ Settings
 
-Choose the format and quality.
-
-My starting point:
-
-| Goal | Setting |
-| --- | --- |
-| Good default | WEBP q90 |
-| Smaller archive copies | WEBP q80 |
-| Compatibility over size | JPG q90 |
-
-Do not use WEBP Lossless if you need drag-and-drop back into ComfyUI. ComfyUI does not read workflows from lossless WEBP files.
+Choose the format and quality.<br>
+⚠️ Do not use WEBP Lossless if you need drag-and-drop back into ComfyUI. ComfyUI does not read workflows from lossless WEBP files.
 
 <p align="center">
   <img src="./_readme/settings.webp">
 </p>
+<br>
 
-### Preview
+## 👁️ Preview
 
 Preview lets you compare the original PNG with the converted result before converting a full folder.
 
@@ -102,8 +93,9 @@ You can zoom in and pan around the image, which is useful for checking faces, te
 <p align="center">
   <img src="./_readme/preview.webp">
 </p>
+<br>
 
-### Convert
+## ♻️ Convert
 
 This is where you run the batch.
 
@@ -121,13 +113,16 @@ There is a separate danger-zone option to strip workflow and prompt metadata fro
   <img src="./_readme/convert.webp">
 </p>
 
+<br><br>
+
 ## Limitations
 
-- It only converts PNG inputs.
+- It only converts PNG inputs (for now).
 - It is currently a Windows app.
 - It needs Python installed on the machine.
-- WEBP Lossless is not recommended if you want ComfyUI workflow drag-and-drop.
-- Keeping workflow metadata depends on the source PNG actually containing ComfyUI `prompt` or `workflow` data.
+- WEBP 100% Lossless is not recommended if you want ComfyUI workflow drag-and-drop.
+
+<br><br>
 
 ## Installation
 
@@ -141,6 +136,8 @@ Requirements:
 - Windows 10 or 11;
 - Python 3.9 or newer;
 - Python must be available in `PATH`.
+
+<br><br>
 
 ## Uninstall
 
