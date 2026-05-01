@@ -18,7 +18,7 @@ if not exist "_app\.venv\Scripts\python.exe" (
     echo.
     echo    - Nothing is installed outside this folder
     echo    - To uninstall: simply delete this folder
-    echo    - One-time download of approximately 20 MB
+    echo    - One-time download of approximately 27 MB
     echo.
     echo  Packages that will be downloaded:
     echo.
@@ -98,7 +98,7 @@ if not exist "_app\.venv\Scripts\python.exe" (
     echo  --------------------------------------------------------
     echo.
     echo  +========================================================+
-    echo  ^|                 ShrinkComfy is ready!                  ^|
+    echo  ^|                  ShrinkComfy is ready!                  ^|
     echo  +========================================================+
     echo.
     echo  Compressed images will be saved here by default:
@@ -106,6 +106,7 @@ if not exist "_app\.venv\Scripts\python.exe" (
     echo    %~dp0output\
     echo.
     echo  You can pick a different folder at any time in the app.
+    echo  Use ShrinkComfy.bat next time to start the application.
     echo.
     echo  Press any key to launch ShrinkComfy...
     pause >nul
